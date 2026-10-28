@@ -1,0 +1,62 @@
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import requests
+import os
+
+app = Flask(__name__)
+CORS(app)
+
+TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'token.txt')
+
+def get_token():
+    with open(TOKEN_FILE) as f:
+        return f.read().strip()
+
+@app.route('/')
+def home():
+    return jsonify({"status": "Server running"})
+
+# Check if token is valid without hitting a heavy endpoint
+@app.route('/token-status')
+def token_status():
+    try:
+        token = get_token()
+    except FileNotFoundError:
+        return jsonify({"valid": False, "reason": "token.txt not found"}), 200
+
+    url = "https://api.upstox.com/v2/user/profile"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        data = res.json().get('data', {})
+        return jsonify({"valid": True, "user_name": data.get('user_name'), "email": data.get('email')})
+    else:
+        return jsonify({"valid": False, "reason": "Token expired or invalid", "details": res.json()})
+
+@app.route('/quote')
+def get_quote():
+    symbol = request.args.get('symbol', 'NSE_INDEX|Nifty 50')
+    url = "https://api.upstox.com/v2/market-quote/quotes"
+    headers = {
+        "Authorization": f"Bearer {get_token()}",
+        "Accept": "application/json"
+    }
+    params = {"instrument_key": symbol}
+    res = requests.get(url, headers=headers, params=params)
+    return jsonify(res.json())
+
+@app.route('/optionchain')
+def get_option_chain():
+    symbol = request.args.get('symbol', 'NSE_INDEX|Nifty 50')
+    expiry = request.args.get('expiry', '')
+    url = "https://api.upstox.com/v2/option/chain"
+    headers = {
+        "Authorization": f"Bearer {get_token()}",
+        "Accept": "application/json"
+    }
+    params = {"instrument_key": symbol, "expiry_date": expiry}
+    res = requests.get(url, headers=headers, params=params)
+    return jsonify(res.json())
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
